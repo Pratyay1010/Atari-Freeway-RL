@@ -3,7 +3,7 @@
 Deep reinforcement learning experiments on the Atari Freeway environment using PyTorch and Gymnasium.
 
 <p align="center">
-  <img src="assets/videos/dqn_agent_gameplay.gif" width="700">
+  <img src="assets/videos/dqn_agent_gameplay.gif" width="100">
 </p>
 
 ## Motivation
