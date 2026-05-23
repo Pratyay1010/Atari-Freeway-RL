@@ -5,7 +5,7 @@ import ale_py
 import cv2
 from torch.utils.tensorboard import SummaryWriter
 from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
-from config import CONFIG
+from configs.default import CONFIG
 from collections import deque
 import random
 

@@ -5,8 +5,8 @@ import gymnasium as gym
 import torch
 import numpy as np
 import pandas as pd
-from train import FreewayAgent
-from config import CONFIG
+from agents.dqn import FreewayAgent
+from configs.default import CONFIG
 
 
 # --- Setup ---

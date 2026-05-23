@@ -4,7 +4,7 @@ import numpy as np
 import ale_py
 from torch.utils.tensorboard import SummaryWriter
 from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
-from config import CONFIG
+from configs.default import CONFIG
 
 
 class Policy(torch.nn.Module):

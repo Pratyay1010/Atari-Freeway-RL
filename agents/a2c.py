@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import ale_py
 from torch.utils.tensorboard import SummaryWriter
-from config import CONFIG
+from configs.default import CONFIG
 from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
 from gymnasium.wrappers import FrameStackObservation
 from gymnasium.wrappers import GrayscaleObservation, ResizeObservation
