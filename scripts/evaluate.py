@@ -1,8 +1,4 @@
-"""
-    Don't Make any changes here, test your train.py code if it works well with this
-"""
 import gymnasium as gym
-import torch
 import numpy as np
 import pandas as pd
 from agents.dqn import FreewayAgent
@@ -10,9 +6,9 @@ from configs.default import CONFIG
 
 
 # --- Setup ---
-MODEL_PATH = CONFIG["ENTRY_NUMBER"]+".pth"
+MODEL_PATH = CONFIG["RUN_NAME"]+".pth"
 NUM_TEST_EPISODES = 5
-REWARDS_CSV_PATH = CONFIG["ENTRY_NUMBER"] + ".csv"
+REWARDS_CSV_PATH = CONFIG["RUN_NAME"] + ".csv"
 
 print("Setting up the testing environment...")
 print(f"testing {MODEL_PATH}")

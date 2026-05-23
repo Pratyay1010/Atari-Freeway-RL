@@ -1,21 +1,22 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 
 # Virtual environments
+.venv/
 venv/
-.env/
 
 # Training artifacts
 *.pth
+*.pt
+*.ckpt
 *.csv
-
-# TensorBoard
 runs/
+tensorboard/
 
-# Videos
-*.mp4
+# Experiment outputs
+checkpoints/
+logs/
 
 # OS
 .DS_Store

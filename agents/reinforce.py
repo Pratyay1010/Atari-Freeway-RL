@@ -90,10 +90,10 @@ class FreewayAgent:
         return action, log_prob
 
 
-    def train(self, num_episodes: int, save_path: str = CONFIG["ENTRY_NUMBER"]):
+    def train(self, num_episodes: int, save_path: str = CONFIG["RUN_NAME"]):
         save_path += ".pth"
         print("Starting REINFORCE training...")
-        writer = SummaryWriter(CONFIG["ENTRY_NUMBER"])
+        writer = SummaryWriter(CONFIG["RUN_NAME"])
 
         for episode in range(num_episodes):
             obs, _ = self.env.reset()

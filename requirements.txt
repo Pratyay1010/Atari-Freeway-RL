@@ -6,3 +6,4 @@ matplotlib
 tensorboard
 ale-py
 pandas
+moviepy

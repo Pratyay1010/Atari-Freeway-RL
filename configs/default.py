@@ -1,6 +1,6 @@
 CONFIG = {
     "OBS_TYPE": "rgb",
-    "ENTRY_NUMBER": "2024JRB2033",
+    "RUN_NAME": "dqn_freeway",
     "GAMMA": 0.99,
     "LEARNING_RATE": 0.0001,
     "EPSILON": 1.0,
@@ -9,5 +9,6 @@ CONFIG = {
     "BUFFER_SIZE": 10000,
     "BATCH_SIZE": 32,
     "TARGET_UPDATE_FREQ": 1000,
-    "TAU": 0.005
+    "TAU": 0.005,
+    "TOTAL_EPS": 1000,
 }

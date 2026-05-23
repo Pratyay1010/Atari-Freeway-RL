@@ -1,18 +1,19 @@
 import gymnasium as gym
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import numpy as np
 import ale_py
-import cv2
-from torch.utils.tensorboard import SummaryWriter
-from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
-from configs.default import CONFIG
-from collections import deque
 import random
+import matplotlib.pyplot as plt
+from collections import deque
+from torch.utils.tensorboard import SummaryWriter
+from configs.default import CONFIG
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size=100000):
-        self.buffer = deque(maxlen=buffer_size)
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
 
     def push(self, state, action, reward, next_state, done):
         self.buffer.append((state, action, reward, next_state, done))
@@ -24,246 +25,391 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-def preprocess_frame(frame, obs_type=CONFIG["OBS_TYPE"]):
-    """
-    Preprocess frame based on observation type
-    """
-    if obs_type == "rgb":
-        # Convert RGB to grayscale and resize
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        frame = cv2.resize(frame, (84, 84))
-    elif obs_type == "grayscale":
-        # Already grayscale, just resize
-        frame = cv2.resize(frame, (84, 84))
-    else:
-        raise ValueError(f"Unsupported observation type: {obs_type}")
-    
-    # Normalize to [0, 1]
-    frame = frame.astype(np.float32) / 255.0
-    return frame
+class Policy(nn.Module):
+    def __init__(self, observation_space_shape, action_space_dim):
+        super().__init__()
 
+        h, w, c = observation_space_shape
 
-class FrameStack:
-    """Stack multiple frames together for temporal information"""
-    def __init__(self, stack_size=4):
-        self.stack_size = stack_size
-        self.frames = deque(maxlen=stack_size)
-    
-    def reset(self, frame):
-        """Reset with initial frame, duplicated to fill stack"""
-        self.frames.clear()
-        for _ in range(self.stack_size):
-            self.frames.append(frame)
-        return np.stack(self.frames, axis=0)  # Shape: (stack_size, 84, 84)
-    
-    def append(self, frame):
-        """Add new frame to stack"""
-        self.frames.append(frame)
-        return np.stack(self.frames, axis=0)
-
-
-class CNNPolicy(torch.nn.Module):
-    def __init__(self, input_channels: int, num_actions: int):
-        super(CNNPolicy, self).__init__()
-        self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            torch.nn.ReLU()
+        self.conv = nn.Sequential(
+            nn.Conv2d(c, 16, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU()
         )
-        
-        # Calculate the output size of convolutional layers
-        conv_out_size = self._get_conv_out((input_channels, 84, 84))
-        
-        self.fc = torch.nn.Sequential(
-            torch.nn.Linear(conv_out_size, 512),
-            torch.nn.ReLU(),
-            torch.nn.Linear(512, num_actions)
+
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, c, h, w)
+            conv_out_size = self.conv(dummy_input).view(1, -1).size(1)
+
+        self.fc = nn.Sequential(
+            nn.Linear(conv_out_size, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_space_dim)
         )
-        
-    def _get_conv_out(self, shape):
-        o = self.conv(torch.zeros(1, *shape))
-        return int(np.prod(o.size()))
-        
-    def forward(self, x):
-        conv_out = self.conv(x).view(x.size()[0], -1)
-        return self.fc(conv_out)
+
+    def forward(self, state):
+        state = state.float() / 255.0
+        x = self.conv(state)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
 
 
 class FreewayAgent:
     def __init__(self, env):
         self.env = env
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Frame stacking
-        self.stack_size = 4
-        self.frame_stack = FrameStack(stack_size=self.stack_size)
-        
-        # Model parameters
+
+        self.observation_space_shape = env.observation_space.shape
         self.action_space_dim = env.action_space.n
-        self.model = CNNPolicy(self.stack_size, self.action_space_dim).to(self.device)
-        self.target_model = CNNPolicy(self.stack_size, self.action_space_dim).to(self.device)
-        self.target_model.load_state_dict(self.model.state_dict())
 
-        # Optimizer and loss
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
-        self.loss_fn = torch.nn.MSELoss()
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
 
-        # Hyperparameters
-        self.gamma = 0.99
-        self.epsilon = 1.0
-        self.epsilon_min = 0.05
-        self.epsilon_decay = 0.995
+        print(f"Using device: {self.device}")
 
-        # Replay buffer
-        self.replay_buffer = ReplayBuffer(buffer_size=100000)
-        self.batch_size = 64
-        self.tau = 0.005  # soft update factor
+        self.gamma = CONFIG["GAMMA"]
+        self.learning_rate = CONFIG["LEARNING_RATE"]
 
-    def get_action(self, obs):
-        # Preprocess the frame
-        processed_frame = preprocess_frame(obs, CONFIG["OBS_TYPE"])
-        
-        # Get current state (stacked frames)
-        if not hasattr(self, 'current_state'):
-            # First frame, initialize stack
-            state = self.frame_stack.reset(processed_frame)
-            self.current_state = state
-        else:
-            # Update stack with new frame
-            state = self.frame_stack.append(processed_frame)
-        
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(self.action_space_dim)
-        else:
-            with torch.no_grad():
-                # Convert to tensor and add batch dimension
-                state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-                q_values = self.model(state_tensor)
+        self.epsilon = CONFIG["EPSILON"]
+        self.epsilon_min = CONFIG["EPSILON_MIN"]
+        self.epsilon_decay = CONFIG["EPSILON_DECAY"]
+
+        self.batch_size = CONFIG["BATCH_SIZE"]
+        self.target_update_freq = CONFIG["TARGET_UPDATE_FREQ"]
+        self.tau = CONFIG["TAU"]
+
+        self.q_network = Policy(
+            self.observation_space_shape,
+            self.action_space_dim
+        ).to(self.device)
+
+        self.target_network = Policy(
+            self.observation_space_shape,
+            self.action_space_dim
+        ).to(self.device)
+
+        self.target_network.load_state_dict(
+            self.q_network.state_dict()
+        )
+
+        self.target_network.eval()
+
+        self.optimizer = optim.Adam(
+            self.q_network.parameters(),
+            lr=self.learning_rate
+        )
+
+        self.criterion = nn.MSELoss()
+
+        self.replay_buffer = ReplayBuffer(
+            CONFIG["BUFFER_SIZE"]
+        )
+
+        self.steps_done = 0
+        self.episode_rewards = []
+
+    def preprocess_obs(self, obs):
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float32)
+
+        obs = obs.permute(2, 0, 1)
+
+        return obs.to(self.device)
+
+    def get_action(self, obs, training=False):
+        if training and random.random() < self.epsilon:
+            return random.randrange(self.action_space_dim)
+
+        with torch.no_grad():
+            obs = obs.unsqueeze(0)
+
+            q_values = self.q_network(obs)
+
             return q_values.argmax().item()
-        
-    def update(self):
-        if len(self.replay_buffer) < self.batch_size:
-            return
 
-        batch = self.replay_buffer.sample(self.batch_size)
+    def update_target_network(self):
+        target_state_dict = self.target_network.state_dict()
+        q_state_dict = self.q_network.state_dict()
+
+        for key in q_state_dict:
+            target_state_dict[key] = (
+                self.tau * q_state_dict[key]
+                + (1 - self.tau) * target_state_dict[key]
+            )
+
+        self.target_network.load_state_dict(
+            target_state_dict
+        )
+
+    def learn(self):
+        if len(self.replay_buffer) < self.batch_size:
+            return 0
+
+        batch = self.replay_buffer.sample(
+            self.batch_size
+        )
+
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        # Convert to tensors
-        states = torch.tensor(np.array(states), dtype=torch.float32).to(self.device)
-        actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1).to(self.device)
-        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1).to(self.device)
-        next_states = torch.tensor(np.array(next_states), dtype=torch.float32).to(self.device)
-        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1).to(self.device)
+        states = torch.stack(states).to(self.device)
+        next_states = torch.stack(next_states).to(self.device)
 
-        # Current Q values
-        q_values = self.model(states).gather(1, actions)
+        actions = torch.tensor(
+            actions,
+            dtype=torch.long
+        ).unsqueeze(1).to(self.device)
 
-        # Target Q values
+        rewards = torch.tensor(
+            rewards,
+            dtype=torch.float32
+        ).unsqueeze(1).to(self.device)
+
+        dones = torch.tensor(
+            dones,
+            dtype=torch.float32
+        ).unsqueeze(1).to(self.device)
+
+        current_q_values = self.q_network(states).gather(1, actions)
+
         with torch.no_grad():
-            next_q_values = self.target_model(next_states).max(1)[0].unsqueeze(1)
-            target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+            next_q_values = self.target_network(
+                next_states
+            ).max(1)[0].unsqueeze(1)
 
-        # Compute loss
-        loss = self.loss_fn(q_values, target_q_values)
+            target_q_values = rewards + (
+                (1 - dones) * self.gamma * next_q_values
+            )
 
-        # Optimize
+        loss = self.criterion(
+            current_q_values,
+            target_q_values
+        )
+
         self.optimizer.zero_grad()
+
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+        torch.nn.utils.clip_grad_norm_(
+            self.q_network.parameters(),
+            1.0
+        )
+
         self.optimizer.step()
 
-        # Soft update target network
-        for target_param, local_param in zip(self.target_model.parameters(), self.model.parameters()):
-            target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
+        return loss.item()
 
-    def train(self, num_episodes: int, save_path: str = CONFIG["ENTRY_NUMBER"]):
+    def train(self, num_episodes, save_path=CONFIG["RUN_NAME"]):
         save_path += ".pth"
-        print("Starting DQN training with CNN...")
-        writer = SummaryWriter(CONFIG["ENTRY_NUMBER"])
+
+        print("Starting DQN training...")
+
+        writer = SummaryWriter(CONFIG["RUN_NAME"])
+
+        best_reward = float("-inf")
+
+        recent_rewards = deque(maxlen=100)
 
         for episode in range(num_episodes):
             obs, _ = self.env.reset()
-            
-            # Reset frame stack for new episode
-            processed_frame = preprocess_frame(obs, CONFIG["OBS_TYPE"])
-            current_state = self.frame_stack.reset(processed_frame)
-            
+
+            obs = self.preprocess_obs(obs)
+
             done = False
             total_reward = 0
-            action_counts = torch.zeros(self.action_space_dim)
+            episode_loss = 0
+            steps_in_episode = 0
 
             while not done:
-                action = self.get_action(obs)
+                action = self.get_action(
+                    obs,
+                    training=True
+                )
+
                 next_obs, reward, terminated, truncated, _ = self.env.step(action)
-                
-                # Preprocess next frame
-                next_processed_frame = preprocess_frame(next_obs, CONFIG["OBS_TYPE"])
-                next_state = self.frame_stack.append(next_processed_frame)
-                
+
                 done = terminated or truncated
-                
-                # Store transition in replay buffer
-                self.replay_buffer.push(current_state, action, reward, next_state, done)
-                
-                # Update current state
-                current_state = next_state
-                
-                # Train the network
-                self.update()
-                
+
+                next_obs = self.preprocess_obs(next_obs)
+
+                self.replay_buffer.push(
+                    obs,
+                    action,
+                    reward,
+                    next_obs,
+                    done
+                )
+
+                if len(self.replay_buffer) >= self.batch_size:
+                    loss = self.learn()
+
+                    episode_loss += loss
+
+                    self.update_target_network()
+
                 total_reward += reward
-                action_counts[action] += 1
-                obs = next_obs  # Keep raw obs for get_action
+                steps_in_episode += 1
+                self.steps_done += 1
 
-            # TensorBoard logging
-            writer.add_scalar('Total Reward per Episode', total_reward, episode)
-            if episode % 10 == 0:
-                # Convert the last frame to tensor for logging
-                last_frame = preprocess_frame(obs, CONFIG["OBS_TYPE"])
-                obs_tensor = torch.tensor(last_frame, dtype=torch.float32).unsqueeze(0)
-                writer.add_image('Last Frame', obs_tensor, episode)
+                obs = next_obs
 
-            writer.add_scalar("Epsilon", self.epsilon, episode)
-            self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
-            
-            writer.add_histogram("Action Distribution", action_counts, episode)
-            print(f"Episode {episode+1}/{num_episodes}, Reward={total_reward}")
+            self.episode_rewards.append(total_reward)
 
-        print(f"Training finished. Saving model to '{save_path}'...")
+            if self.epsilon > self.epsilon_min:
+                self.epsilon *= self.epsilon_decay
+
+            recent_rewards.append(total_reward)
+
+            avg_recent_reward = (
+                np.mean(recent_rewards)
+                if recent_rewards else 0
+            )
+
+            if total_reward > best_reward:
+                best_reward = total_reward
+
+                torch.save(
+                    self.q_network.state_dict(),
+                    save_path
+                )
+
+                print(
+                    f"New best model saved "
+                    f"with reward: {best_reward}"
+                )
+
+            if episode_loss > 0:
+                avg_loss = episode_loss / steps_in_episode
+
+                writer.add_scalar(
+                    "Loss/Episode",
+                    avg_loss,
+                    episode
+                )
+
+            writer.add_scalar(
+                "Reward/Episode",
+                total_reward,
+                episode
+            )
+
+            writer.add_scalar(
+                "Epsilon",
+                self.epsilon,
+                episode
+            )
+
+            writer.add_scalar(
+                "Reward/Recent_Average",
+                avg_recent_reward,
+                episode
+            )
+
+            if episode % 50 == 0:
+                writer.add_image(
+                    "Last_Frame",
+                    obs.detach().cpu(),
+                    episode
+                )
+
+            print(
+                f"Episode {episode + 1}/{num_episodes} | "
+                f"Reward: {total_reward} | "
+                f"Avg Reward: {avg_recent_reward:.2f} | "
+                f"Epsilon: {self.epsilon:.3f}"
+            )
+
+        self.plot_rewards()
+
+        print(
+            f"Training finished. "
+            f"Best model saved to '{save_path}'"
+        )
+
         writer.close()
-        torch.save(self.model.state_dict(), save_path)
 
-    def load_model(self, path: str):
+    def plot_rewards(self):
+        plt.figure(figsize=(10, 5))
+
+        plt.plot(
+            self.episode_rewards,
+            label="Episode Reward"
+        )
+
+        window_size = 50
+
+        if len(self.episode_rewards) >= window_size:
+            moving_avg = np.convolve(
+                self.episode_rewards,
+                np.ones(window_size) / window_size,
+                mode="valid"
+            )
+
+            plt.plot(
+                range(window_size - 1, len(self.episode_rewards)),
+                moving_avg,
+                label=f"Moving Average ({window_size})",
+                color="red"
+            )
+
+        plt.title("DQN Training Rewards")
+        plt.xlabel("Episode")
+        plt.ylabel("Reward")
+
+        plt.grid(True)
+        plt.legend()
+
+        plt.savefig(
+            f'{CONFIG["RUN_NAME"]}_training_rewards.png'
+        )
+
+        plt.close()
+
+    def load_model(self, path):
         try:
-            self.model.load_state_dict(torch.load(path))
-            self.model.eval()
-            print(f"Successfully loaded model from '{path}'")
+            self.q_network.load_state_dict(
+                torch.load(path, map_location=self.device)
+            )
+
+            self.q_network.eval()
+
+            self.epsilon = 0.0
+
+            print(
+                f"Successfully loaded model from '{path}'"
+            )
+
             return True
+
         except FileNotFoundError:
-            print(f"Error: Model file '{path}' not found.")
+            print(
+                f"Error: Model file '{path}' not found."
+            )
+
             return False
+
+        except Exception as e:
+            print(f"Error loading model: {e}")
+
+            return False
+
+    @property
+    def model(self):
+        return self.q_network
 
 
 if __name__ == "__main__":
     gym.register_envs(ale_py)
 
-    run_dir = "runs"
-
-    env = gym.make("ALE/Freeway-v5", obs_type=CONFIG["OBS_TYPE"], render_mode="rgb_array")
-    
-    env = RecordVideo(
-        env,
-        video_folder=run_dir + "/videos_dqn",
-        name_prefix="train",
-        episode_trigger=lambda ep: ep % 10 == 0  # record every 10th episode
+    env = gym.make(
+        "ALE/Freeway-v5",
+        obs_type=CONFIG["OBS_TYPE"]
     )
 
-    env = RecordEpisodeStatistics(env, buffer_length=100)
-
     agent = FreewayAgent(env)
-    agent.train(num_episodes=1000)  # Increased from 100 to 1000 episodes
 
-    env.close()
+    agent.train(
+        num_episodes=CONFIG["TOTAL_EPS"]
+    )
