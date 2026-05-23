@@ -63,7 +63,7 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/Pratyay1010/Atari-Freeway-RL.git
-cd atari-freeway-rl
+cd Atari-Freeway-RL
 ```
 
 Create a virtual environment:
