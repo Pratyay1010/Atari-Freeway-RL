@@ -2,11 +2,9 @@
 
 Deep reinforcement learning experiments on the Atari Freeway environment using PyTorch and Gymnasium.
 
-<p align="center">
-  <img src="assets/videos/dqn_agent_gameplay.mp4" width="700">
-</p>
+## Agent Gameplay
+https://github.com/Pratyay1010/Atari-Freeway-RL/blob/main/assets/videos/dqn_agent_gameplay.mp4
 
----
 
 ## Motivation
 
@@ -21,7 +19,7 @@ The repository focuses on:
 - temporal difference learning
 - policy optimization in sparse reward settings
 
----
+
 
 ## Environment
 
@@ -33,17 +31,17 @@ The repository focuses on:
 
 The Freeway environment presents a sparse reward challenge where the agent must learn to cross lanes of moving traffic without collisions.
 
----
+
 
 ## Implemented Agents
 
 | Agent | Description |
-|---|---|
+|||
 | DQN | Deep Q-Network with experience replay and target network updates |
 | A2C | Advantage Actor-Critic implementation |
 | REINFORCE | Monte Carlo policy gradient baseline |
 
----
+
 
 ## Repository Structure
 
@@ -57,7 +55,7 @@ requirements.txt
 README.md
 ```
 
----
+
 
 ## Installation
 
@@ -97,7 +95,7 @@ pip install "gymnasium[atari]"
 pip install "gymnasium[other]"
 ```
 
----
+
 
 ## Usage
 
@@ -119,7 +117,7 @@ python main.py --agent a2c
 python main.py --agent reinforce
 ```
 
----
+
 
 ## Evaluation
 
@@ -129,7 +127,7 @@ Run evaluation using:
 python -m scripts.evaluate
 ```
 
----
+
 
 ## Results
 
@@ -147,7 +145,7 @@ Observed learning characteristics:
 - stable convergence after exploration phase
 - improved policy consistency over training
 
----
+
 
 ## Best Performing Approach
 
@@ -157,7 +155,7 @@ The DQN implementation achieved the best overall performance due to:
 - improved sample efficiency
 - more stable temporal difference learning
 
----
+
 
 ## Outputs
 
@@ -168,7 +166,7 @@ Training outputs include:
 
 Generated assets are stored locally during training.
 
----
+
 
 ## Dependencies
 
@@ -187,7 +185,7 @@ Install all dependencies using:
 pip install -r requirements.txt
 ```
 
----
+
 
 ## Future Improvements
 
