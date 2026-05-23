@@ -2,9 +2,9 @@
 
 Deep reinforcement learning experiments on the Atari Freeway environment using PyTorch and Gymnasium.
 
-## Agent Gameplay
-https://github.com/Pratyay1010/Atari-Freeway-RL/blob/main/assets/videos/dqn_agent_gameplay.mp4
-
+<p align="center">
+  <img src="assets/videos/dqn_agent_gameplay.gif" width="700">
+</p>
 
 ## Motivation
 
