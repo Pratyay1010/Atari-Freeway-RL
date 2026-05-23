@@ -36,7 +36,7 @@ The Freeway environment presents a sparse reward challenge where the agent must 
 ## Implemented Agents
 
 | Agent | Description |
-|||
+|---|---|
 | DQN | Deep Q-Network with experience replay and target network updates |
 | A2C | Advantage Actor-Critic implementation |
 | REINFORCE | Monte Carlo policy gradient baseline |
@@ -62,7 +62,7 @@ README.md
 Clone the repository:
 
 ```bash
-git clone https://github.com/<your-username>/atari-freeway-rl.git
+git clone https://github.com/Pratyay1010/Atari-Freeway-RL.git
 cd atari-freeway-rl
 ```
 
